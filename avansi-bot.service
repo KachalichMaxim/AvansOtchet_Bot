@@ -1,0 +1,21 @@
+[Unit]
+Description=Avansi Telegram Bot for Employee Advance Reports
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/avansi-bot
+Environment="PATH=/opt/avansi-bot/venv/bin"
+ExecStart=/opt/avansi-bot/venv/bin/python -m bot.main
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=avansi-bot
+
+[Install]
+WantedBy=multi-user.target
+

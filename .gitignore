@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Service account credentials (keep the file but don't commit if it contains secrets)
+# tonal-concord-464913-u3-2024741e839c.json
+
+# OS
+.DS_Store
+Thumbs.db
+
