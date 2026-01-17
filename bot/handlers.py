@@ -212,10 +212,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context_obj = fsm.get_context(user_id)
             # Check if this is rental payment flow (no category set) or category flow
             if not context_obj.category:
-                # Rental payment flow: set date to today, direction to IN, then ask for amount
+                # Rental payment flow: set date to today, direction to IN, category and type
                 today = datetime.now(TZ).strftime("%d.%m.%Y")
                 fsm.set_date(user_id, today)
                 fsm.set_direction(user_id, "IN")
+                # Set category and type for rental payment
+                fsm.set_category(user_id, "Доходы от аренды")
+                # Get type for rental category - try to find "Перевод от арендатора" or use first available
+                types = sheets_client.get_types("IN", "Доходы от аренды")
+                if types and "Перевод от арендатора" in types:
+                    fsm.set_type(user_id, "Перевод от арендатора")
+                elif types:
+                    fsm.set_type(user_id, types[0])
+                else:
+                    fsm.set_type(user_id, "")
                 fsm.set_state(user_id, State.INPUT_RENTAL_AMOUNT)
                 await request_rental_amount(query, context)
             else:
@@ -389,6 +399,7 @@ async def show_confirmation(query, context: ContextTypes.DEFAULT_TYPE):
     
     direction_text = "Поступление" if context_obj.direction == "IN" else "Списание"
     amount_text = format_balance(context_obj.amount)
+    category_display = context_obj.category if context_obj.category else "—"
     type_display = context_obj.type if context_obj.type else "—"
     
     text = (
@@ -396,7 +407,7 @@ async def show_confirmation(query, context: ContextTypes.DEFAULT_TYPE):
         f"Тип: {direction_text}\n"
         f"Дата: {context_obj.date}\n"
         f"Сумма: {amount_text}\n"
-        f"Категория: {context_obj.category}\n"
+        f"Категория: {category_display}\n"
         f"Тип: {type_display}\n"
     )
     
@@ -766,7 +777,7 @@ async def request_rental_amount(query, context: ContextTypes.DEFAULT_TYPE):
     context_obj = fsm.get_context(query.from_user.id)
     # Shorten address to first 4 letters for compact display
     address_short = context_obj.rental_address[:4] if context_obj.rental_address else ""
-    text = f"💰 Введите сумму оплаты:\n\n📍 {address_short} М/М {context_obj.rental_mm}"
+    text = f"💰 Сумма оплаты:\n{address_short} М/М {context_obj.rental_mm}\n\n(Адрес: {context_obj.rental_address})"
     await query.edit_message_text(text, reply_markup=reply_markup)
 
 
@@ -782,7 +793,7 @@ async def request_rental_amount_for_text(message, context: ContextTypes.DEFAULT_
     context_obj = fsm.get_context(user_id)
     # Shorten address to first 4 letters for compact display
     address_short = context_obj.rental_address[:4] if context_obj.rental_address else ""
-    text = f"💰 Введите сумму оплаты:\n\n📍 {address_short} М/М {context_obj.rental_mm}"
+    text = f"💰 Сумма оплаты:\n{address_short} М/М {context_obj.rental_mm}\n\n(Адрес: {context_obj.rental_address})"
     await message.reply_text(text, reply_markup=reply_markup)
 
 
