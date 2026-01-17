@@ -764,9 +764,9 @@ async def request_rental_amount(query, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     context_obj = fsm.get_context(query.from_user.id)
-    # Shorten address to first 4 letters
+    # Shorten address to first 4 letters for compact display
     address_short = context_obj.rental_address[:4] if context_obj.rental_address else ""
-    text = f"💰 Сумма оплаты:\n{address_short} М/М {context_obj.rental_mm}"
+    text = f"💰 Введите сумму оплаты:\n\n📍 {address_short} М/М {context_obj.rental_mm}"
     await query.edit_message_text(text, reply_markup=reply_markup)
 
 
@@ -780,9 +780,9 @@ async def request_rental_amount_for_text(message, context: ContextTypes.DEFAULT_
     
     user_id = message.from_user.id
     context_obj = fsm.get_context(user_id)
-    # Shorten address to first 4 letters
+    # Shorten address to first 4 letters for compact display
     address_short = context_obj.rental_address[:4] if context_obj.rental_address else ""
-    text = f"💰 Сумма оплаты:\n{address_short} М/М {context_obj.rental_mm}"
+    text = f"💰 Введите сумму оплаты:\n\n📍 {address_short} М/М {context_obj.rental_mm}"
     await message.reply_text(text, reply_markup=reply_markup)
 
 
