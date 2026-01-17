@@ -189,11 +189,15 @@ class SheetsClient:
             type_name = operation_data["type"]
             description = operation_data.get("description", "")
             
+            # Get optional rental fields
+            address = operation_data.get("address", "")
+            mm_number = operation_data.get("mm_number", "")
+            
             # Determine which column gets the amount
             if direction == "IN":
-                row_data = [date, amount, "", category, type_name, description]
+                row_data = [date, amount, "", category, type_name, description, "", address, mm_number]
             else:  # OUT
-                row_data = [date, "", amount, category, type_name, description]
+                row_data = [date, "", amount, category, type_name, description, "", address, mm_number]
             
             # Parse the operation date for sorting
             day, month, year = map(int, date.split('.'))
