@@ -833,6 +833,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif state == State.INPUT_DESCRIPTION:
         fsm.set_description(user_id, text)
         await show_confirmation_for_text(update.message, context)
+    elif state == State.INPUT_RENTAL_AMOUNT:
+        is_valid, amount, error = validate_amount(text)
+        if is_valid:
+            fsm.set_rental_amount(user_id, amount)
+            await show_confirmation_for_text(update.message, context)
+        else:
+            await update.message.reply_text(error + "\n\nПопробуйте еще раз.")
     
     else:
         await update.message.reply_text(
