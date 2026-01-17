@@ -616,15 +616,27 @@ async def show_rental_objects(query, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Format table: Адрес | М/М | Дата | Сумма
-    text = "🏠 Объекты аренды\n\n"
-    text += "Адрес | М/М | Дата | Сумма\n"
-    text += "─" * 40 + "\n"
+    # Format table: Адрес | М/М | Дата | Сумма (with code formatting for monospace)
+    header = "🏠 Объекты аренды\n\n"
+    
+    # Build table with fixed-width columns for proper alignment
+    table_lines = []
+    table_lines.append("Адрес          | М/М  | Дата      | Сумма")
+    table_lines.append("─" * 50)
     
     for obj in objects:
         date_display = obj.next_payment_date if obj.next_payment_date else "—"
         amount_display = format_balance(obj.payment_amount) if obj.payment_amount else "—"
-        text += f"{obj.address} | {obj.mm_number} | {date_display} | {amount_display}\n"
+        # Format with fixed widths for alignment
+        address = (obj.address[:15] + "...") if len(obj.address) > 15 else obj.address.ljust(15)
+        mm = str(obj.mm_number).ljust(5)
+        date = date_display.ljust(10)
+        amount = amount_display.ljust(12)
+        table_lines.append(f"{address} | {mm} | {date} | {amount}")
+    
+    # Combine header with code-formatted table
+    table_text = "\n".join(table_lines)
+    text = f"{header}```\n{table_text}\n```"
     
     keyboard = [
         [InlineKeyboardButton("➕ Добавить оплату", callback_data="rental_add_payment")],
@@ -632,7 +644,7 @@ async def show_rental_objects(query, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(text, reply_markup=reply_markup)
+    await query.edit_message_text(text, reply_markup=reply_markup, parse_mode="Markdown")
 
 
 async def show_rental_addresses(query, context: ContextTypes.DEFAULT_TYPE):
