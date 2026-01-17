@@ -88,3 +88,4 @@ def format_date_for_sheets(date_str: str) -> str:
     """Ensure date is in dd.mm.yyyy format for sheets."""
     return date_str
 
+

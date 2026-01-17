@@ -25,4 +25,5 @@ SHEET_TEMPLATE = "Шаблон_Сотрудника"
 SHEET_AUDIT_LOG = "Audit_Log"
 SHEET_MONTHLY_SUMMARY = "Итоги_Месяц"
 SHEET_USERS = "Users"
+SHEET_RENTAL = "Справочник М/М"
 

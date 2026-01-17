@@ -12,6 +12,9 @@ class State(Enum):
     INPUT_AMOUNT = "INPUT_AMOUNT"
     SELECT_CATEGORY = "SELECT_CATEGORY"
     SELECT_TYPE = "SELECT_TYPE"
+    SELECT_RENTAL_ADDRESS = "SELECT_RENTAL_ADDRESS"
+    SELECT_RENTAL_MM = "SELECT_RENTAL_MM"
+    INPUT_RENTAL_AMOUNT = "INPUT_RENTAL_AMOUNT"
     INPUT_DESCRIPTION = "INPUT_DESCRIPTION"
     CONFIRM = "CONFIRM"
     SAVE = "SAVE"
@@ -26,6 +29,8 @@ class OperationContext:
     category: Optional[str] = None
     type: Optional[str] = None
     description: Optional[str] = None
+    rental_address: Optional[str] = None  # For rental operations
+    rental_mm: Optional[str] = None  # For rental operations
 
 
 class FSM:
@@ -82,7 +87,11 @@ class FSM:
         """Set operation category and move to next state."""
         context = self.get_context(user_id)
         context.category = category
-        self.set_state(user_id, State.SELECT_TYPE)
+        # If category is "Доходы от аренды", go to address selection instead of type
+        if category == "Доходы от аренды":
+            self.set_state(user_id, State.SELECT_RENTAL_ADDRESS)
+        else:
+            self.set_state(user_id, State.SELECT_TYPE)
     
     def set_type(self, user_id: int, type_name: str):
         """Set operation type and move to next state."""
@@ -121,7 +130,7 @@ class FSM:
         ]):
             return None
         
-        return {
+        result = {
             "date": context.date,
             "direction": context.direction,
             "amount": context.amount,
@@ -129,6 +138,14 @@ class FSM:
             "type": context.type,
             "description": context.description or "",
         }
+        
+        # Add rental fields if present
+        if context.rental_address:
+            result["address"] = context.rental_address
+        if context.rental_mm:
+            result["mm_number"] = context.rental_mm
+        
+        return result
     
     def is_in_operation_flow(self, user_id: int) -> bool:
         """Check if user is in operation flow (not IDLE)."""
@@ -180,6 +197,44 @@ class FSM:
             context.description = None
             self.set_state(user_id, State.INPUT_DESCRIPTION)
             return True
+        elif state == State.SELECT_RENTAL_ADDRESS:
+            # Go back to category selection
+            context.category = None
+            self.set_state(user_id, State.SELECT_CATEGORY)
+            return True
+        elif state == State.SELECT_RENTAL_MM:
+            # Go back to address selection
+            context.rental_address = None
+            self.set_state(user_id, State.SELECT_RENTAL_ADDRESS)
+            return True
+        elif state == State.INPUT_RENTAL_AMOUNT:
+            # Go back to М/М selection
+            context.rental_mm = None
+            self.set_state(user_id, State.SELECT_RENTAL_MM)
+            return True
         else:
             return False
+    
+    def set_rental_address(self, user_id: int, address: str):
+        """Set rental address and move to М/М selection."""
+        context = self.get_context(user_id)
+        context.rental_address = address
+        self.set_state(user_id, State.SELECT_RENTAL_MM)
+    
+    def set_rental_mm(self, user_id: int, mm_number: str):
+        """Set rental М/М and move to description or confirm."""
+        context = self.get_context(user_id)
+        context.rental_mm = mm_number
+        # If this is a rental payment flow (not through category), go to amount input
+        # Otherwise go to description
+        if context.category == "Доходы от аренды":
+            self.set_state(user_id, State.INPUT_DESCRIPTION)
+        else:
+            self.set_state(user_id, State.INPUT_RENTAL_AMOUNT)
+    
+    def set_rental_amount(self, user_id: int, amount: float):
+        """Set rental payment amount and move to confirm."""
+        context = self.get_context(user_id)
+        context.amount = amount
+        self.set_state(user_id, State.CONFIRM)
 

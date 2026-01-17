@@ -9,6 +9,7 @@ from bot.config import (
     SHEET_AUDIT_LOG,
     SHEET_MONTHLY_SUMMARY,
     SHEET_USERS,
+    SHEET_RENTAL,
 )
 
 
@@ -47,16 +48,19 @@ def setup_sheets():
         template_sheet = spreadsheet.worksheet(SHEET_TEMPLATE)
         print(f"✓ Sheet '{SHEET_TEMPLATE}' already exists")
     except gspread.exceptions.WorksheetNotFound:
-        template_sheet = spreadsheet.add_worksheet(title=SHEET_TEMPLATE, rows=100, cols=10)
-        # Set headers
-        headers = ["Дата", "Поступление (+)", "Списание (-)", "Категория", "Тип", "Описание", "Остаток после операции"]
-        template_sheet.update("A1:G1", [headers])
+        template_sheet = spreadsheet.add_worksheet(title=SHEET_TEMPLATE, rows=100, cols=15)
+        # Set headers - add Address (H) and М/М (I) columns
+        headers = ["Дата", "Поступление (+)", "Списание (-)", "Категория", "Тип", "Описание", "Остаток после операции", "Адрес", "М/М"]
+        template_sheet.update("A1:I1", [headers])
         
         # Format header row
-        template_sheet.format("A1:G1", {
+        template_sheet.format("A1:I1", {
             "backgroundColor": {"red": 0.2, "green": 0.6, "blue": 0.9},
             "textFormat": {"bold": True},
         })
+        
+        # Set M1 placeholder (will be filled with employee name when sheet is created)
+        template_sheet.update("M1", [["Имя сотрудника"]])
         
         # Add balance formula in G2 (first data row)
         # Formula uses semicolons for Russian locale: =IF(ROW()=2; IF(B2<>""; B2; -C2); INDIRECT("G"&ROW()-1) + IF(B2<>""; B2; 0) - IF(C2<>""; C2; 0))

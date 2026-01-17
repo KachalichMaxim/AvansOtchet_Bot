@@ -3,6 +3,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from datetime import datetime
 from bot.fsm import FSM, State
+from bot.rental_models import add_days_to_date
 from bot.sheets_client import SheetsClient
 from bot.utils import (
     validate_date,
@@ -118,6 +119,11 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📊 Итоги за месяц", callback_data="monthly_summary")],
         [InlineKeyboardButton("💰 Текущий остаток", callback_data="show_balance")],
     ]
+    
+    # Add rental button if employee has rental objects
+    if sheets_client.has_rental_objects(employee_name):
+        keyboard.append([InlineKeyboardButton("🏠 Аренда", callback_data="rental_menu")])
+    
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     text = (
@@ -163,7 +169,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("category_"):
         category = data.replace("category_", "").replace("_", " ")
         fsm.set_category(user_id, category)
-        await show_type_selection(query, context)
+        # If category is "Доходы от аренды", show address selection instead of type
+        if category == "Доходы от аренды":
+            await show_rental_addresses(query, context)
+        else:
+            await show_type_selection(query, context)
     elif data.startswith("type_"):
         type_name = data.replace("type_", "").replace("_", " ")
         # Handle empty type
@@ -183,6 +193,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(update, context)
     elif data == "go_back":
         await handle_go_back(query, context)
+    elif data == "rental_menu":
+        await show_rental_objects(query, context)
+    elif data == "rental_add_payment":
+        await show_rental_addresses(query, context)
+    elif data.startswith("rental_address_"):
+        address = data.replace("rental_address_", "").replace("_", " ")
+        fsm.set_rental_address(user_id, address)
+        await show_rental_mm(query, context, address)
+    elif data.startswith("rental_mm_"):
+        mm_data = data.replace("rental_mm_", "")
+        # Format: address_mm_number (need to decode)
+        parts = mm_data.rsplit("_", 1)
+        if len(parts) == 2:
+            address = parts[0].replace("_", " ")
+            mm_number = parts[1]
+            fsm.set_rental_mm(user_id, mm_number)
+            context_obj = fsm.get_context(user_id)
+            # Check if this is rental payment flow (no category set) or category flow
+            if not context_obj.category:
+                # Rental payment flow: set date to today, direction to IN, then ask for amount
+                today = datetime.now(TZ).strftime("%d.%m.%Y")
+                fsm.set_date(user_id, today)
+                fsm.set_direction(user_id, "IN")
+                fsm.set_state(user_id, State.INPUT_RENTAL_AMOUNT)
+                await request_rental_amount(query, context)
+            else:
+                # Category flow: continue to description
+                await request_description(query, context)
 
 
 async def show_operation_type_selection(query, context: ContextTypes.DEFAULT_TYPE):
@@ -362,6 +400,12 @@ async def show_confirmation(query, context: ContextTypes.DEFAULT_TYPE):
         f"Тип: {type_display}\n"
     )
     
+    # Show rental info if present
+    if context_obj.rental_address:
+        text += f"Адрес: {context_obj.rental_address}\n"
+    if context_obj.rental_mm:
+        text += f"М/М: {context_obj.rental_mm}\n"
+    
     if context_obj.description:
         text += f"Описание: {context_obj.description}\n"
     
@@ -388,8 +432,26 @@ async def save_operation(query, context: ContextTypes.DEFAULT_TYPE):
         fsm.reset(user_id)
         return
     
+    # Check if this is a rental payment (no category means it's from rental menu)
+    context_obj = fsm.get_context(user_id)
+    is_rental_payment = not context_obj.category and context_obj.rental_address and context_obj.rental_mm
+    
+    # If rental payment, update operation data to include category and type
+    if is_rental_payment:
+        operation_data["category"] = "Доходы от аренды"
+        operation_data["type"] = f"{context_obj.rental_address} {context_obj.rental_mm}"
+    
     # Save operation
     if sheets_client.add_operation(employee_name, operation_data):
+        # If rental payment, update next payment date (+30 days)
+        if is_rental_payment and context_obj.rental_address and context_obj.rental_mm:
+            payment_date = context_obj.date
+            sheets_client.update_rental_payment_date(
+                context_obj.rental_address,
+                context_obj.rental_mm,
+                payment_date
+            )
+        
         # Get new balance
         balance = sheets_client.get_balance(employee_name)
         balance_text = format_balance(balance) if balance is not None else "0 ₽"
@@ -410,10 +472,21 @@ async def save_operation(query, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📊 Итоги за месяц", callback_data="monthly_summary")],
             [InlineKeyboardButton("💰 Текущий остаток", callback_data="show_balance")],
         ]
+        
+        # Add rental button if employee has rental objects
+        if sheets_client.has_rental_objects(employee_name):
+            keyboard.append([InlineKeyboardButton("🏠 Аренда", callback_data="rental_menu")])
+        
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        success_text = "✅ Операция сохранена!"
+        if is_rental_payment:
+            from bot.rental_models import add_days_to_date
+            new_date = add_days_to_date(context_obj.date, 30)
+            success_text += f"\n\n📅 Следующий платеж: {new_date}"
+        
         text = (
-            f"✅ Операция сохранена!\n\n"
+            f"{success_text}\n\n"
             f"📋 Главное меню\n\n"
             f"Сотрудник: {employee_name}\n"
             f"Текущий остаток: {balance_text}\n\n"
@@ -523,6 +596,178 @@ async def show_monthly_summary_result(query, context: ContextTypes.DEFAULT_TYPE,
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def show_rental_objects(query, context: ContextTypes.DEFAULT_TYPE):
+    """Show rental objects with upcoming payments."""
+    user_id = query.from_user.id
+    employee_name = get_employee_name(user_id)
+    
+    objects = sheets_client.get_rental_objects_for_employee(employee_name)
+    
+    if not objects:
+        keyboard = [
+            [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "У вас нет объектов аренды с предстоящими платежами.",
+            reply_markup=reply_markup
+        )
+        return
+    
+    # Format table: Адрес | М/М | Дата | Сумма
+    text = "🏠 Объекты аренды\n\n"
+    text += "Адрес | М/М | Дата | Сумма\n"
+    text += "─" * 40 + "\n"
+    
+    for obj in objects:
+        date_display = obj.next_payment_date if obj.next_payment_date else "—"
+        amount_display = format_balance(obj.payment_amount) if obj.payment_amount else "—"
+        text += f"{obj.address} | {obj.mm_number} | {date_display} | {amount_display}\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("➕ Добавить оплату", callback_data="rental_add_payment")],
+        [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def show_rental_addresses(query, context: ContextTypes.DEFAULT_TYPE):
+    """Show rental addresses for selection."""
+    user_id = query.from_user.id
+    employee_name = get_employee_name(user_id)
+    
+    # Get addresses - if category is "Доходы от аренды", show only unpaid
+    context_obj = fsm.get_context(user_id)
+    if context_obj.category == "Доходы от аренды":
+        mm_list = sheets_client.get_rental_mm_without_payments(employee_name)
+        addresses = sorted(list(set([mm['address'] for mm in mm_list])))
+    else:
+        addresses = sheets_client.get_rental_addresses_for_employee(employee_name)
+    
+    if not addresses:
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "Нет доступных адресов для выбора.",
+            reply_markup=reply_markup
+        )
+        return
+    
+    keyboard = []
+    for address in addresses:
+        callback_data = f"rental_address_{address.replace(' ', '_')}"
+        keyboard.append([InlineKeyboardButton(address, callback_data=callback_data)])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="go_back")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "Выберите адрес:",
+        reply_markup=reply_markup
+    )
+
+
+async def show_rental_mm(query, context: ContextTypes.DEFAULT_TYPE, address: str):
+    """Show М/М numbers for selected address."""
+    user_id = query.from_user.id
+    employee_name = get_employee_name(user_id)
+    context_obj = fsm.get_context(user_id)
+    
+    # Get М/М - if category is "Доходы от аренды", show only unpaid
+    if context_obj.category == "Доходы от аренды":
+        mm_list = sheets_client.get_rental_mm_without_payments(employee_name)
+        mm_numbers = [mm['mm_number'] for mm in mm_list if mm['address'] == address]
+    else:
+        mm_numbers = sheets_client.get_rental_mm_for_address(employee_name, address)
+    
+    if not mm_numbers:
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            f"Нет доступных М/М для адреса {address}.",
+            reply_markup=reply_markup
+        )
+        return
+    
+    keyboard = []
+    for mm_number in mm_numbers:
+        # Encode address and mm in callback data
+        callback_data = f"rental_mm_{address.replace(' ', '_')}_{mm_number}"
+        keyboard.append([InlineKeyboardButton(f"М/М {mm_number}", callback_data=callback_data)])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="go_back")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"Выберите М/М для адреса {address}:",
+        reply_markup=reply_markup
+    )
+
+
+async def show_rental_mm_for_text(message, context: ContextTypes.DEFAULT_TYPE, address: str):
+    """Show М/М selection as message (for text flow)."""
+    user_id = message.from_user.id
+    employee_name = get_employee_name(user_id)
+    context_obj = fsm.get_context(user_id)
+    
+    if context_obj.category == "Доходы от аренды":
+        mm_list = sheets_client.get_rental_mm_without_payments(employee_name)
+        mm_numbers = [mm['mm_number'] for mm in mm_list if mm['address'] == address]
+    else:
+        mm_numbers = sheets_client.get_rental_mm_for_address(employee_name, address)
+    
+    keyboard = []
+    for mm_number in mm_numbers:
+        callback_data = f"rental_mm_{address.replace(' ', '_')}_{mm_number}"
+        keyboard.append([InlineKeyboardButton(f"М/М {mm_number}", callback_data=callback_data)])
+    
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="go_back")])
+    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="cancel")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        f"Выберите М/М для адреса {address}:",
+        reply_markup=reply_markup
+    )
+
+
+async def request_rental_amount(query, context: ContextTypes.DEFAULT_TYPE):
+    """Request rental payment amount."""
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    context_obj = fsm.get_context(query.from_user.id)
+    text = f"Введите сумму оплаты для {context_obj.rental_address}, М/М {context_obj.rental_mm}:"
+    await query.edit_message_text(text, reply_markup=reply_markup)
+
+
+async def request_rental_amount_for_text(message, context: ContextTypes.DEFAULT_TYPE):
+    """Request rental payment amount as message."""
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    user_id = message.from_user.id
+    context_obj = fsm.get_context(user_id)
+    text = f"Введите сумму оплаты для {context_obj.rental_address}, М/М {context_obj.rental_mm}:"
+    await message.reply_text(text, reply_markup=reply_markup)
 
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

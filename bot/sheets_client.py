@@ -10,8 +10,15 @@ from bot.config import (
     SHEET_AUDIT_LOG,
     SHEET_MONTHLY_SUMMARY,
     SHEET_USERS,
+    SHEET_RENTAL,
 )
 from bot.utils import get_current_timestamp
+from bot.rental_models import RentalObject, parse_rental_date, format_rental_date, add_days_to_date
+from datetime import datetime
+from bot.config import TIMEZONE
+from pytz import timezone
+
+TZ = timezone(TIMEZONE)
 
 
 class SheetsClient:
@@ -158,6 +165,8 @@ class SheetsClient:
         - category: str
         - type: str
         - description: str (optional)
+        - address: str (optional) - for rental operations
+        - mm_number: str (optional) - for rental operations
         """
         sheet = self._get_sheet(employee_name)
         if not sheet:
@@ -553,4 +562,191 @@ class SheetsClient:
         except Exception as e:
             print(f"Error getting user: {e}")
             return None
+    
+    def get_rental_objects_for_employee(self, employee_name: str) -> List[RentalObject]:
+        """
+        Get all rental objects for employee.
+        
+        Filters by:
+        - Ответственный = employee_name
+        - next_payment_date is not empty
+        - Sorted by date (ascending)
+        """
+        sheet = self._get_sheet(SHEET_RENTAL)
+        if not sheet:
+            return []
+        
+        try:
+            all_values = sheet.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            
+            objects = []
+            today = datetime.now(TZ)
+            
+            for i, row in enumerate(all_values[1:], start=2):  # Skip header
+                if len(row) < 6:
+                    continue
+                
+                # Parse row: Юр.лицо, Адрес, М/М, Дата следующего платежа, Платеж по аренде, Ответственный, Оплачено
+                legal_entity = row[0].strip() if len(row) > 0 and row[0] else ""
+                address = row[1].strip() if len(row) > 1 and row[1] else ""
+                mm_number = row[2].strip() if len(row) > 2 and row[2] else ""
+                next_payment_date_str = row[3].strip() if len(row) > 3 and row[3] else ""
+                payment_amount_str = row[4].strip() if len(row) > 4 and row[4] else ""
+                responsible = row[5].strip() if len(row) > 5 and row[5] else ""
+                paid_this_month_str = row[6].strip() if len(row) > 6 and row[6] else ""
+                
+                # Filter by responsible
+                if responsible != employee_name:
+                    continue
+                
+                # Skip if date is empty
+                if not next_payment_date_str:
+                    continue
+                
+                # Parse payment amount
+                payment_amount = None
+                if payment_amount_str:
+                    try:
+                        payment_amount_str = payment_amount_str.replace("\xa0", "").replace(" ", "").replace(",", ".")
+                        payment_amount = float(payment_amount_str)
+                    except ValueError:
+                        pass
+                
+                # Parse paid_this_month
+                paid_this_month = paid_this_month_str.upper() == "TRUE" if paid_this_month_str else None
+                
+                # Parse date
+                next_payment_date = next_payment_date_str if next_payment_date_str else None
+                
+                objects.append(RentalObject(
+                    legal_entity=legal_entity,
+                    address=address,
+                    mm_number=mm_number,
+                    next_payment_date=next_payment_date,
+                    payment_amount=payment_amount,
+                    responsible=responsible,
+                    paid_this_month=paid_this_month,
+                    row_index=i
+                ))
+            
+            # Sort by date (ascending)
+            def sort_key(obj):
+                if not obj.next_payment_date:
+                    return datetime.max
+                date_obj = parse_rental_date(obj.next_payment_date)
+                return date_obj if date_obj else datetime.max
+            
+            objects.sort(key=sort_key)
+            return objects
+        except Exception as e:
+            print(f"Error getting rental objects: {e}")
+            return []
+    
+    def has_rental_objects(self, employee_name: str) -> bool:
+        """Check if employee has any rental objects."""
+        objects = self.get_rental_objects_for_employee(employee_name)
+        return len(objects) > 0
+    
+    def get_rental_addresses_for_employee(self, employee_name: str) -> List[str]:
+        """Get unique addresses for employee's rental objects."""
+        objects = self.get_rental_objects_for_employee(employee_name)
+        addresses = set()
+        for obj in objects:
+            if obj.address:
+                addresses.add(obj.address)
+        return sorted(list(addresses))
+    
+    def get_rental_mm_for_address(self, employee_name: str, address: str) -> List[str]:
+        """Get М/М numbers for specific address."""
+        objects = self.get_rental_objects_for_employee(employee_name)
+        mm_numbers = []
+        for obj in objects:
+            if obj.address == address and obj.mm_number:
+                mm_numbers.append(obj.mm_number)
+        return sorted(list(set(mm_numbers)))
+    
+    def get_rental_mm_without_payments(self, employee_name: str) -> List[Dict[str, str]]:
+        """
+        Get М/М that haven't been paid (paid_this_month != TRUE).
+        
+        Returns:
+            List of dicts with 'address' and 'mm_number'
+        """
+        sheet = self._get_sheet(SHEET_RENTAL)
+        if not sheet:
+            return []
+        
+        try:
+            all_values = sheet.get_all_values()
+            if len(all_values) <= 1:
+                return []
+            
+            mm_list = []
+            for row in all_values[1:]:  # Skip header
+                if len(row) < 7:
+                    continue
+                
+                address = row[1].strip() if len(row) > 1 and row[1] else ""
+                mm_number = row[2].strip() if len(row) > 2 and row[2] else ""
+                responsible = row[5].strip() if len(row) > 5 and row[5] else ""
+                paid_this_month_str = row[6].strip() if len(row) > 6 and row[6] else ""
+                
+                # Filter by responsible
+                if responsible != employee_name:
+                    continue
+                
+                # Filter by not paid
+                paid_this_month = paid_this_month_str.upper() == "TRUE"
+                if paid_this_month:
+                    continue
+                
+                if address and mm_number:
+                    mm_list.append({
+                        'address': address,
+                        'mm_number': mm_number
+                    })
+            
+            return mm_list
+        except Exception as e:
+            print(f"Error getting rental М/М without payments: {e}")
+            return []
+    
+    def update_rental_payment_date(self, address: str, mm_number: str, payment_date: str) -> bool:
+        """
+        Update next payment date (+30 days) in rental sheet.
+        
+        Args:
+            address: Address of the rental object
+            mm_number: М/М number
+            payment_date: Payment date in DD.MM.YYYY format
+            
+        Returns:
+            True if updated successfully
+        """
+        sheet = self._get_sheet(SHEET_RENTAL)
+        if not sheet:
+            return False
+        
+        try:
+            # Calculate new date (+30 days)
+            new_date = add_days_to_date(payment_date, 30)
+            
+            # Find the row with matching address and М/М
+            all_values = sheet.get_all_values()
+            for i, row in enumerate(all_values[1:], start=2):  # Skip header
+                if len(row) >= 3:
+                    row_address = row[1].strip() if len(row) > 1 and row[1] else ""
+                    row_mm = row[2].strip() if len(row) > 2 and row[2] else ""
+                    
+                    if row_address == address and row_mm == mm_number:
+                        # Update date in column D (index 4, 1-based)
+                        sheet.update_cell(i, 4, new_date)
+                        return True
+            
+            return False
+        except Exception as e:
+            print(f"Error updating rental payment date: {e}")
+            return False
 
