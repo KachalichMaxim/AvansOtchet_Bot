@@ -71,6 +71,12 @@ class SheetsClient:
             )
             self._sheet_cache[employee_name] = new_sheet
             
+            # Fill M1 with employee name
+            try:
+                new_sheet.update("M1", [[employee_name]])
+            except Exception as e:
+                print(f"Error setting M1 for {employee_name}: {e}")
+            
             # Log creation
             self.log_audit({
                 "user": employee_name,
