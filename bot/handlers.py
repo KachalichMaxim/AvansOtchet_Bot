@@ -560,28 +560,38 @@ async def show_balance(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def show_monthly_summary_menu(query, context: ContextTypes.DEFAULT_TYPE):
     """Show monthly summary month selection."""
-    # Generate last 12 months
-    keyboard = []
-    current_month = get_current_month()
-    month_num, year = map(int, current_month.split('.'))
+    user_id = query.from_user.id
+    employee_name = get_employee_name(user_id)
     
-    for i in range(12):
-        m = month_num - i
-        y = year
-        while m <= 0:
-            m += 12
-            y -= 1
-        
-        month_str = f"{m:02d}.{y}"
-        month_label = f"{m:02d}.{y}"
-        if i == 0:
-            month_label += " (текущий)"
-        
+    # Get months with operations
+    months = sheets_client.get_months_with_operations(employee_name)
+    
+    if not months:
+        keyboard = [
+            [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "У вас нет операций за какой-либо период.",
+            reply_markup=reply_markup
+        )
+        return
+    
+    # Month names in Russian
+    month_names = {
+        1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель", 5: "Май", 6: "Июнь",
+        7: "Июль", 8: "Август", 9: "Сентябрь", 10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+    }
+    
+    keyboard = []
+    for month_str in months:
+        month_num, year = map(int, month_str.split('.'))
+        month_label = f"{month_names[month_num]} {year}"
         keyboard.append([
             InlineKeyboardButton(month_label, callback_data=f"month_{month_str}")
         ])
     
-    keyboard.append([InlineKeyboardButton("❌ Отмена", callback_data="back_to_menu")])
+    keyboard.append([InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
