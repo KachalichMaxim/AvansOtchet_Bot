@@ -791,7 +791,8 @@ async def request_rental_amount(query, context: ContextTypes.DEFAULT_TYPE):
     
     amount_display = format_balance(payment_amount) if payment_amount else "—"
     
-    # If amount found, set it automatically in context
+    # If amount found, set it automatically in context and show it
+    # But don't change state here - it should be already set to INPUT_RENTAL_AMOUNT
     if payment_amount:
         context_obj.amount = payment_amount
     
@@ -801,6 +802,23 @@ async def request_rental_amount(query, context: ContextTypes.DEFAULT_TYPE):
         f"М/М {context_obj.rental_mm}\n"
         f"Сумма : {amount_display}"
     )
+    
+    # If amount is set, allow user to confirm directly
+    if payment_amount:
+        keyboard = [
+            [InlineKeyboardButton("✅ Подтвердить сумму", callback_data="confirm_rental_amount")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        text += "\n\nСумма автоматически подставлена из справочника. Нажмите 'Подтвердить сумму' или введите другую сумму."
+    else:
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="cancel")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await query.edit_message_text(text, reply_markup=reply_markup)
 
 
