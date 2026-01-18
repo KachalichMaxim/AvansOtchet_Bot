@@ -443,25 +443,31 @@ async def save_operation(query, context: ContextTypes.DEFAULT_TYPE):
         fsm.reset(user_id)
         return
     
-    # Check if this is a rental payment (no category means it's from rental menu)
+    # Check if this is a rental payment (has rental address and MM, or category is "Доходы от аренды")
     context_obj = fsm.get_context(user_id)
-    is_rental_payment = not context_obj.category and context_obj.rental_address and context_obj.rental_mm
+    is_rental_payment = (context_obj.rental_address and context_obj.rental_mm) or (
+        context_obj.category == "Доходы от аренды" and context_obj.rental_address and context_obj.rental_mm
+    )
     
     # If rental payment, update operation data to include category and type
-    if is_rental_payment:
-        operation_data["category"] = "Доходы от аренды"
-        operation_data["type"] = f"{context_obj.rental_address} {context_obj.rental_mm}"
+    if context_obj.rental_address and context_obj.rental_mm:
+        if not operation_data.get("category") or operation_data["category"] != "Доходы от аренды":
+            operation_data["category"] = "Доходы от аренды"
+        if not operation_data.get("type"):
+            operation_data["type"] = f"{context_obj.rental_address} {context_obj.rental_mm}"
     
     # Save operation
     if sheets_client.add_operation(employee_name, operation_data):
-        # If rental payment, update next payment date (+30 days)
+        # If rental payment, update next payment date (+30 days) in Справочник М/М
         if is_rental_payment and context_obj.rental_address and context_obj.rental_mm:
             payment_date = context_obj.date
-            sheets_client.update_rental_payment_date(
+            success = sheets_client.update_rental_payment_date(
                 context_obj.rental_address,
                 context_obj.rental_mm,
                 payment_date
             )
+            if not success:
+                print(f"Warning: Failed to update rental payment date for {context_obj.rental_address}, М/М {context_obj.rental_mm}")
         
         # Get new balance
         balance = sheets_client.get_balance(employee_name)
