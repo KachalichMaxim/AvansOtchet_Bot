@@ -351,10 +351,20 @@ class SheetsClient:
                         
                         # Check if matches requested month
                         if row_month == month_num and row_year == year:
-                            if row[1]:  # Income
-                                income += float(row[1])
-                            if row[2]:  # Expense
-                                expense += float(row[2])
+                            # Parse income (column B)
+                            if len(row) > 1 and row[1]:
+                                try:
+                                    income_str = row[1].replace("\xa0", "").replace(" ", "").replace(",", ".")
+                                    income += float(income_str)
+                                except ValueError:
+                                    pass
+                            # Parse expense (column C)
+                            if len(row) > 2 and row[2]:
+                                try:
+                                    expense_str = row[2].replace("\xa0", "").replace(" ", "").replace(",", ".")
+                                    expense += float(expense_str)
+                                except ValueError:
+                                    pass
                     except (ValueError, IndexError):
                         continue
             
