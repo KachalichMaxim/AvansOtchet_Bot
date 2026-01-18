@@ -615,13 +615,13 @@ async def show_monthly_summary_result(query, context: ContextTypes.DEFAULT_TYPE,
     
     income_text = format_balance(summary["income"])
     expense_text = format_balance(summary["expense"])
-    net_text = format_balance(summary["net"])
+    ending_balance_text = format_balance(summary["ending_balance"])
     
     text = (
         f"📊 Итоги за {month}\n\n"
         f"Поступления: {income_text}\n"
         f"Списания: {expense_text}\n"
-        f"Чистый результат: {net_text}"
+        f"Остаток на конец месяца: {ending_balance_text}"
     )
     
     keyboard = [

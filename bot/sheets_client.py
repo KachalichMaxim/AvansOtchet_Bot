@@ -326,7 +326,7 @@ class SheetsClient:
         employee_name: str,
         month: str  # MM.YYYY format
     ) -> Optional[Dict[str, float]]:
-        """Get monthly totals for an employee."""
+        """Get monthly totals and ending balance for an employee."""
         sheet = self._get_sheet(employee_name)
         if not sheet:
             return None
@@ -338,10 +338,11 @@ class SheetsClient:
             # Get all operations
             all_values = sheet.get_all_values()
             if len(all_values) <= 1:
-                return {"income": 0.0, "expense": 0.0, "net": 0.0}
+                return {"income": 0.0, "expense": 0.0, "ending_balance": 0.0}
             
             income = 0.0
             expense = 0.0
+            operations = []
             
             for row in all_values[1:]:  # Skip header
                 if len(row) >= 3 and row[0]:  # Has date
@@ -349,29 +350,52 @@ class SheetsClient:
                         # Parse date
                         day, row_month, row_year = map(int, row[0].split('.'))
                         
-                        # Check if matches requested month
-                        if row_month == month_num and row_year == year:
+                        # Get operations for the requested month and all previous months
+                        if (row_year < year) or (row_year == year and row_month <= month_num):
                             # Parse income (column B)
+                            row_income = 0.0
                             if len(row) > 1 and row[1]:
                                 try:
                                     income_str = row[1].replace("\xa0", "").replace(" ", "").replace(",", ".")
-                                    income += float(income_str)
+                                    row_income = float(income_str)
                                 except ValueError:
                                     pass
+                            
                             # Parse expense (column C)
+                            row_expense = 0.0
                             if len(row) > 2 and row[2]:
                                 try:
                                     expense_str = row[2].replace("\xa0", "").replace(" ", "").replace(",", ".")
-                                    expense += float(expense_str)
+                                    row_expense = float(expense_str)
                                 except ValueError:
                                     pass
+                            
+                            # Count only operations from requested month
+                            if row_month == month_num and row_year == year:
+                                income += row_income
+                                expense += row_expense
+                            
+                            # Collect all operations up to end of month for balance calculation
+                            operations.append({
+                                'date': (row_year, row_month, day),
+                                'income': row_income,
+                                'expense': row_expense
+                            })
                     except (ValueError, IndexError):
                         continue
+            
+            # Sort operations by date (chronological order)
+            operations.sort(key=lambda x: x['date'])
+            
+            # Calculate ending balance: sum all operations up to end of requested month
+            ending_balance = 0.0
+            for op in operations:
+                ending_balance += op['income'] - op['expense']
             
             return {
                 "income": income,
                 "expense": expense,
-                "net": income - expense,
+                "ending_balance": ending_balance,
             }
         except Exception as e:
             print(f"Error getting monthly summary: {e}")
