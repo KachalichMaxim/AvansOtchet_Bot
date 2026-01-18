@@ -452,11 +452,9 @@ async def save_operation(query, context: ContextTypes.DEFAULT_TYPE):
         fsm.reset(user_id)
         return
     
-    # Check if this is a rental payment (has rental address and MM, or category is "Доходы от аренды")
+    # Check if this is a rental payment (has rental address and MM)
     context_obj = fsm.get_context(user_id)
-    is_rental_payment = (context_obj.rental_address and context_obj.rental_mm) or (
-        context_obj.category == "Доходы от аренды" and context_obj.rental_address and context_obj.rental_mm
-    )
+    is_rental_payment = bool(context_obj.rental_address and context_obj.rental_mm)
     
     # If rental payment, update operation data to include category and type
     if context_obj.rental_address and context_obj.rental_mm:
