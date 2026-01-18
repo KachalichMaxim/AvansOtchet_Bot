@@ -884,12 +884,20 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         fsm.set_description(user_id, text)
         await show_confirmation_for_text(update.message, context)
     elif state == State.INPUT_RENTAL_AMOUNT:
-        is_valid, amount, error = validate_amount(text)
-        if is_valid:
-            fsm.set_rental_amount(user_id, amount)
+        # If amount is already set from справочник, skip validation
+        context_obj = fsm.get_context(user_id)
+        if context_obj.amount is not None:
+            # Amount already set, proceed to confirmation
+            fsm.set_state(user_id, State.CONFIRM)
             await show_confirmation_for_text(update.message, context)
         else:
-            await update.message.reply_text(error + "\n\nПопробуйте еще раз.")
+            # User entered amount manually, validate it
+            is_valid, amount, error = validate_amount(text)
+            if is_valid:
+                fsm.set_rental_amount(user_id, amount)
+                await show_confirmation_for_text(update.message, context)
+            else:
+                await update.message.reply_text(error + "\n\nПопробуйте еще раз.")
     
     else:
         await update.message.reply_text(
