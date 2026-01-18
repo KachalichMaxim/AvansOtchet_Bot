@@ -723,6 +723,42 @@ class SheetsClient:
             print(f"Error getting rental М/М without payments: {e}")
             return []
     
+    def get_rental_payment_amount(self, address: str, mm_number: str) -> Optional[float]:
+        """
+        Get payment amount for rental object from Справочник М/М.
+        
+        Args:
+            address: Address of the rental object
+            mm_number: М/М number
+            
+        Returns:
+            Payment amount or None if not found
+        """
+        sheet = self._get_sheet(SHEET_RENTAL)
+        if not sheet:
+            return None
+        
+        try:
+            all_values = sheet.get_all_values()
+            for row in all_values[1:]:  # Skip header
+                if len(row) >= 5:
+                    row_address = row[1].strip() if len(row) > 1 and row[1] else ""
+                    row_mm = row[2].strip() if len(row) > 2 and row[2] else ""
+                    payment_amount_str = row[4].strip() if len(row) > 4 and row[4] else ""
+                    
+                    if row_address == address and row_mm == mm_number:
+                        # Parse payment amount
+                        if payment_amount_str:
+                            try:
+                                payment_amount_str = payment_amount_str.replace("\xa0", "").replace(" ", "").replace(",", ".")
+                                return float(payment_amount_str)
+                            except ValueError:
+                                pass
+            return None
+        except Exception as e:
+            print(f"Error getting rental payment amount: {e}")
+            return None
+    
     def update_rental_payment_date(self, address: str, mm_number: str, payment_date: str) -> bool:
         """
         Update next payment date (+30 days) in rental sheet.
