@@ -633,23 +633,24 @@ async def show_rental_objects(query, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Format table: Адрес | М/М | Дата | Сумма (with code formatting for monospace)
+    # Format table: Объект | Дата | Сумма (with code formatting for monospace)
     header = "🏠 Объекты аренды\n\n"
     
     # Build table with fixed-width columns for proper alignment
     table_lines = []
-    table_lines.append("Адрес          | М/М  | Дата      | Сумма")
-    table_lines.append("─" * 50)
+    table_lines.append("Объект         | Дата      | Сумма")
+    table_lines.append("─" * 40)
     
     for obj in objects:
         date_display = obj.next_payment_date if obj.next_payment_date else "—"
         amount_display = format_balance(obj.payment_amount) if obj.payment_amount else "—"
-        # Format with fixed widths for alignment
-        address = (obj.address[:15] + "...") if len(obj.address) > 15 else obj.address.ljust(15)
-        mm = str(obj.mm_number).ljust(5)
+        # Format object as "Адрес М/М номер" (e.g., "Кетчер 180")
+        object_name = f"{obj.address} {obj.mm_number}" if obj.address and obj.mm_number else (obj.address or obj.mm_number or "—")
+        # Truncate if too long
+        object_name = (object_name[:15] + "...") if len(object_name) > 15 else object_name.ljust(15)
         date = date_display.ljust(10)
         amount = amount_display.ljust(12)
-        table_lines.append(f"{address} | {mm} | {date} | {amount}")
+        table_lines.append(f"{object_name} | {date} | {amount}")
     
     # Combine header with code-formatted table
     table_text = "\n".join(table_lines)
