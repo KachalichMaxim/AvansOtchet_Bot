@@ -186,6 +186,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_confirmation(query, context)
     elif data == "confirm_operation":
         await save_operation(query, context)
+    elif data == "confirm_rental_amount":
+        # Confirm rental amount and go to operation confirmation
+        user_id = query.from_user.id
+        context_obj = fsm.get_context(user_id)
+        if context_obj.amount is not None:
+            fsm.set_state(user_id, State.CONFIRM)
+            await show_confirmation(query, context)
+        else:
+            await query.answer("Ошибка: сумма не установлена")
     elif data.startswith("month_"):
         month = data.replace("month_", "")
         await show_monthly_summary_result(query, context, month)
