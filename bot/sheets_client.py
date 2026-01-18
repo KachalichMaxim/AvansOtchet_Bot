@@ -377,6 +377,38 @@ class SheetsClient:
             print(f"Error getting monthly summary: {e}")
             return None
     
+    def get_months_with_operations(self, employee_name: str) -> List[str]:
+        """
+        Get list of months (MM.YYYY format) that have operations.
+        
+        Returns:
+            List of month strings in format "MM.YYYY", sorted descending (newest first)
+        """
+        sheet = self._get_sheet(employee_name)
+        if not sheet:
+            return []
+        
+        try:
+            months_set = set()
+            all_values = sheet.get_all_values()
+            
+            for row in all_values[1:]:  # Skip header
+                if len(row) >= 1 and row[0]:  # Has date
+                    try:
+                        # Parse date
+                        day, row_month, row_year = map(int, row[0].split('.'))
+                        month_str = f"{row_month:02d}.{row_year}"
+                        months_set.add(month_str)
+                    except (ValueError, IndexError):
+                        continue
+            
+            # Sort descending (newest first)
+            months_list = sorted(months_set, key=lambda x: (int(x.split('.')[1]), int(x.split('.')[0])), reverse=True)
+            return months_list
+        except Exception as e:
+            print(f"Error getting months with operations: {e}")
+            return []
+    
     def _update_monthly_summary(
         self,
         employee_name: str,
