@@ -61,17 +61,8 @@ def setup_sheets():
         
         # Set M1 placeholder (will be filled with employee name when sheet is created)
         template_sheet.update("M1", [["Имя сотрудника"]])
-        
-        # Add balance formula in G2 (first data row)
-        # Formula uses semicolons for Russian locale: =IF(ROW()=2; IF(B2<>""; B2; -C2); INDIRECT("G"&ROW()-1) + IF(B2<>""; B2; 0) - IF(C2<>""; C2; 0))
-        formula = '=IF(ROW()=2; IF(B2<>""; B2; -C2); INDIRECT("G"&ROW()-1) + IF(B2<>""; B2; 0) - IF(C2<>""; C2; 0))'
-        template_sheet.update("G2", [[formula]], value_input_option="USER_ENTERED")
-        
-        # Copy formula to more rows (for when data is added)
-        # We'll handle this dynamically, but set up a few rows
-        for row in range(3, 11):
-            formula_row = f'=IF(ROW()={row}; IF(B{row}<>""; B{row}; -C{row}); INDIRECT("G"&ROW()-1) + IF(B{row}<>""; B{row}; 0) - IF(C{row}<>""; C{row}; 0))'
-            template_sheet.update(f"G{row}", [[formula_row]], value_input_option="USER_ENTERED")
+        # IMPORTANT: We do NOT set any formulas into G2:G anymore.
+        # Monthly totals and ending balance are calculated in Итоги_месяца via INDIRECT+SUMIFS.
         
         print(f"✓ Created sheet '{SHEET_TEMPLATE}'")
     
@@ -93,14 +84,14 @@ def setup_sheets():
         
         print(f"✓ Created sheet '{SHEET_AUDIT_LOG}'")
     
-    # 4. Create Итоги_Месяц sheet
+    # 4. Create Итоги_месяца sheet
     try:
         summary_sheet = spreadsheet.worksheet(SHEET_MONTHLY_SUMMARY)
         print(f"✓ Sheet '{SHEET_MONTHLY_SUMMARY}' already exists")
     except gspread.exceptions.WorksheetNotFound:
         summary_sheet = spreadsheet.add_worksheet(title=SHEET_MONTHLY_SUMMARY, rows=1000, cols=10)
         # Set headers
-        headers = ["Сотрудник", "Месяц", "Поступления", "Списания", "Чистый результат"]
+        headers = ["Сотрудник", "Месяц", "Поступления", "Списания", "Остаток на конец месяца"]
         summary_sheet.update("A1:E1", [headers])
         
         # Format header row

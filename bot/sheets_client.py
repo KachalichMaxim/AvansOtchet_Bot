@@ -41,6 +41,15 @@ class SheetsClient:
             try:
                 self._sheet_cache[sheet_name] = self.spreadsheet.worksheet(sheet_name)
             except gspread.exceptions.WorksheetNotFound:
+                # Backward-compatible aliases for renamed sheets
+                if sheet_name == SHEET_MONTHLY_SUMMARY:
+                    for alias in ("Итоги_Месяц", "Итоги_месяц", "Итоги_Месяца", "Итоги_месяца"):
+                        try:
+                            ws = self.spreadsheet.worksheet(alias)
+                            self._sheet_cache[sheet_name] = ws
+                            return ws
+                        except gspread.exceptions.WorksheetNotFound:
+                            continue
                 return None
         return self._sheet_cache[sheet_name]
     
@@ -124,10 +133,7 @@ class SheetsClient:
         for item in reference_data:
             if item["direction"] == direction and item["active"] and item["category"]:
                 categories.add(item["category"])
-        
-        # Always add "Прочее" as fallback option
-        categories.add("Прочее")
-        
+
         return sorted(list(categories))
     
     def get_types(self, direction: str, category: str) -> List[str]:
@@ -149,12 +155,69 @@ class SheetsClient:
         # If we have entries with empty type, add empty string option
         if has_empty_type:
             types.append("")  # Empty type option
-        
-        # If no types found at all, add "Прочее" as fallback
-        if not types and not has_empty_type:
-            types = ["Прочее"]
-        
+
         return types
+
+    def _ensure_monthly_summary_row(self, employee_name: str, month: str) -> None:
+        """
+        Ensure a row exists in Итоги_месяца for (employee_name, month).
+        We only append a new row (with formulas) if it's missing; we don't rewrite existing rows.
+        """
+        try:
+            summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
+            if not summary_sheet:
+                return
+
+            values = summary_sheet.get_all_values()
+            for row in values[1:]:
+                if len(row) >= 2 and row[0].strip() == employee_name and row[1].strip() == month:
+                    return
+
+            next_row = len(values) + 1
+
+            # Month is stored as "MM.YYYY"
+            start_date = f"DATE(VALUE(RIGHT(B{next_row};4)); VALUE(LEFT(B{next_row};2)); 1)"
+            end_date = f"EOMONTH({start_date}; 0)"
+
+            income_formula = (
+                f"=SUMIFS("
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!B:B\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\">=\"&{start_date};"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&{end_date}"
+                f")"
+            )
+            expense_formula = (
+                f"=SUMIFS("
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!C:C\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\">=\"&{start_date};"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&{end_date}"
+                f")"
+            )
+            ending_balance_formula = (
+                f"=SUMIFS("
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!B:B\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&{end_date}"
+                f")"
+                f" - "
+                f"SUMIFS("
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!C:C\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&{end_date}"
+                f")"
+            )
+
+            summary_sheet.update(
+                f"A{next_row}:E{next_row}",
+                [[employee_name, month, income_formula, expense_formula, ending_balance_formula]],
+                value_input_option="USER_ENTERED",
+            )
+        except Exception as e:
+            print(f"Error ensuring monthly summary row: {e}")
     
     def add_operation(
         self,
@@ -224,9 +287,8 @@ class SheetsClient:
             
             # Insert row at the correct position
             sheet.insert_row(row_data, insert_row)
-            
-            # Recalculate all balance formulas to maintain correct running balance
-            self._recalculate_balance_formulas(sheet)
+
+            # IMPORTANT: We no longer write formulas into G2:G.
             
             # Log audit
             self.log_audit({
@@ -238,8 +300,11 @@ class SheetsClient:
                 "new_value": f"{direction} {amount} {category}/{type_name}",
             })
             
-            # Update monthly summary
-            self._update_monthly_summary(employee_name, operation_data)
+            # Ensure period exists in Итоги_месяца (formulas calculate totals)
+            try:
+                self._ensure_monthly_summary_row(employee_name, f"{month:02d}.{year}")
+            except Exception:
+                pass
             
             return True
         except Exception as e:
@@ -326,77 +391,33 @@ class SheetsClient:
         employee_name: str,
         month: str  # MM.YYYY format
     ) -> Optional[Dict[str, float]]:
-        """Get monthly totals and ending balance for an employee."""
-        sheet = self._get_sheet(employee_name)
-        if not sheet:
-            return None
-        
+        """Read monthly totals and ending balance from Итоги_месяца."""
         try:
-            # Parse month
-            month_num, year = map(int, month.split('.'))
-            
-            # Get all operations
-            all_values = sheet.get_all_values()
-            if len(all_values) <= 1:
-                return {"income": 0.0, "expense": 0.0, "ending_balance": 0.0}
-            
-            income = 0.0
-            expense = 0.0
-            operations = []
-            
-            for row in all_values[1:]:  # Skip header
-                if len(row) >= 3 and row[0]:  # Has date
-                    try:
-                        # Parse date
-                        day, row_month, row_year = map(int, row[0].split('.'))
-                        
-                        # Get operations for the requested month and all previous months
-                        if (row_year < year) or (row_year == year and row_month <= month_num):
-                            # Parse income (column B)
-                            row_income = 0.0
-                            if len(row) > 1 and row[1]:
-                                try:
-                                    income_str = row[1].replace("\xa0", "").replace(" ", "").replace(",", ".")
-                                    row_income = float(income_str)
-                                except ValueError:
-                                    pass
-                            
-                            # Parse expense (column C)
-                            row_expense = 0.0
-                            if len(row) > 2 and row[2]:
-                                try:
-                                    expense_str = row[2].replace("\xa0", "").replace(" ", "").replace(",", ".")
-                                    row_expense = float(expense_str)
-                                except ValueError:
-                                    pass
-                            
-                            # Count only operations from requested month
-                            if row_month == month_num and row_year == year:
-                                income += row_income
-                                expense += row_expense
-                            
-                            # Collect all operations up to end of month for balance calculation
-                            operations.append({
-                                'date': (row_year, row_month, day),
-                                'income': row_income,
-                                'expense': row_expense
-                            })
-                    except (ValueError, IndexError):
-                        continue
-            
-            # Sort operations by date (chronological order)
-            operations.sort(key=lambda x: x['date'])
-            
-            # Calculate ending balance: sum all operations up to end of requested month
-            ending_balance = 0.0
-            for op in operations:
-                ending_balance += op['income'] - op['expense']
-            
-            return {
-                "income": income,
-                "expense": expense,
-                "ending_balance": ending_balance,
-            }
+            summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
+            if not summary_sheet:
+                return None
+
+            # Ensure period exists (appends only if missing)
+            self._ensure_monthly_summary_row(employee_name, month)
+
+            values = summary_sheet.get_all_values()
+            for row in values[1:]:
+                if len(row) >= 5 and row[0].strip() == employee_name and row[1].strip() == month:
+                    def _parse_num(s: str) -> float:
+                        if not s:
+                            return 0.0
+                        try:
+                            return float(s.replace("\xa0", "").replace(" ", "").replace(",", "."))
+                        except ValueError:
+                            return 0.0
+
+                    return {
+                        "income": _parse_num(row[2]),
+                        "expense": _parse_num(row[3]),
+                        "ending_balance": _parse_num(row[4]),
+                    }
+
+            return {"income": 0.0, "expense": 0.0, "ending_balance": 0.0}
         except Exception as e:
             print(f"Error getting monthly summary: {e}")
             return None
@@ -427,8 +448,34 @@ class SheetsClient:
                         continue
             
             # Sort descending (newest first)
-            months_list = sorted(months_set, key=lambda x: (int(x.split('.')[1]), int(x.split('.')[0])), reverse=True)
-            return months_list
+            # Ensure rows exist in Итоги_месяца (only appends missing periods)
+            for m in months_set:
+                self._ensure_monthly_summary_row(employee_name, m)
+
+            # Filter to only months where there were operations (income/expense != 0), read from Итоги_месяца
+            summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
+            if not summary_sheet:
+                return sorted(list(months_set), key=lambda x: (int(x.split('.')[1]), int(x.split('.')[0])), reverse=True)
+
+            summary_values = summary_sheet.get_all_values()
+            months_with_ops = set()
+            for row in summary_values[1:]:
+                if len(row) >= 5 and row[0].strip() == employee_name and row[1].strip():
+                    mm = row[1].strip()
+                    if mm not in months_set:
+                        continue
+                    try:
+                        inc = float(row[2].replace("\xa0", "").replace(" ", "").replace(",", ".")) if row[2] else 0.0
+                    except ValueError:
+                        inc = 0.0
+                    try:
+                        exp = float(row[3].replace("\xa0", "").replace(" ", "").replace(",", ".")) if row[3] else 0.0
+                    except ValueError:
+                        exp = 0.0
+                    if abs(inc) > 1e-9 or abs(exp) > 1e-9:
+                        months_with_ops.add(mm)
+
+            return sorted(list(months_with_ops), key=lambda x: (int(x.split('.')[1]), int(x.split('.')[0])), reverse=True)
         except Exception as e:
             print(f"Error getting months with operations: {e}")
             return []
@@ -438,59 +485,17 @@ class SheetsClient:
         employee_name: str,
         operation_data: Dict[str, Any]
     ):
-        """Update monthly summary sheet with new operation."""
+        """
+        Legacy compatibility: Итоги_месяца is formula-driven now.
+        We only ensure the period row exists (with formulas).
+        """
         try:
-            summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
-            if not summary_sheet:
-                return
-            
-            # Parse date to get month
             date_str = operation_data["date"]
             day, month, year = map(int, date_str.split('.'))
             month_str = f"{month:02d}.{year}"
-            
-            direction = operation_data["direction"]
-            amount = operation_data["amount"]
-            
-            # Check if row exists for this employee and month
-            all_values = summary_sheet.get_all_values()
-            row_index = None
-            
-            for i, row in enumerate(all_values[1:], start=2):  # Skip header
-                if len(row) >= 2 and row[0] == employee_name and row[1] == month_str:
-                    row_index = i
-                    break
-            
-            if row_index:
-                # Update existing row
-                current_income = float(summary_sheet.cell(row_index, 3).value or 0)
-                current_expense = float(summary_sheet.cell(row_index, 4).value or 0)
-                
-                if direction == "IN":
-                    new_income = current_income + amount
-                    summary_sheet.update_cell(row_index, 3, new_income)
-                else:
-                    new_expense = current_expense + amount
-                    summary_sheet.update_cell(row_index, 4, new_expense)
-                
-                # Update net
-                net = new_income - new_expense if direction == "IN" else current_income - new_expense
-                summary_sheet.update_cell(row_index, 5, net)
-            else:
-                # Create new row
-                income = amount if direction == "IN" else 0.0
-                expense = amount if direction == "OUT" else 0.0
-                net = income - expense
-                
-                summary_sheet.append_row([
-                    employee_name,
-                    month_str,
-                    income,
-                    expense,
-                    net,
-                ])
-        except Exception as e:
-            print(f"Error updating monthly summary: {e}")
+            self._ensure_monthly_summary_row(employee_name, month_str)
+        except Exception:
+            return
     
     def log_audit(self, action_data: Dict[str, Any]):
         """Write to Audit_Log sheet."""
@@ -515,18 +520,8 @@ class SheetsClient:
             print(f"Error logging audit: {e}")
     
     def _recalculate_balance_formulas(self, sheet):
-        """Recalculate all balance formulas in the sheet after insertion."""
-        try:
-            all_values = sheet.get_all_values()
-            if len(all_values) <= 1:
-                return
-            
-            # Update formulas for all data rows (starting from row 2)
-            for row_num in range(2, len(all_values) + 1):
-                formula = f'=IF(ROW()={row_num}; IF(B{row_num}<>""; B{row_num}; -C{row_num}); INDIRECT("G"&ROW()-1) + IF(B{row_num}<>""; B{row_num}; 0) - IF(C{row_num}<>""; C{row_num}; 0))'
-                sheet.update(f"G{row_num}", [[formula]], value_input_option="USER_ENTERED")
-        except Exception as e:
-            print(f"Error recalculating balance formulas: {e}")
+        """Deprecated: we no longer write formulas into G2:G."""
+        return
     
     def create_sheet_from_template(self, template_name: str, new_name: str) -> bool:
         """Copy template sheet with new name."""

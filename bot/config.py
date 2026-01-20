@@ -23,7 +23,8 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Moscow")
 SHEET_REFERENCE = "Справочник"
 SHEET_TEMPLATE = "Шаблон_Сотрудника"
 SHEET_AUDIT_LOG = "Audit_Log"
-SHEET_MONTHLY_SUMMARY = "Итоги_Месяц"
+# Prefer the canonical name; code also handles legacy variants.
+SHEET_MONTHLY_SUMMARY = "Итоги_месяца"
 SHEET_USERS = "Users"
 SHEET_RENTAL = "Справочник М/М"
 

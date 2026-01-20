@@ -335,10 +335,16 @@ async def show_category_selection(query, context: ContextTypes.DEFAULT_TYPE):
     direction = context_obj.direction
     
     categories = sheets_client.get_categories(direction)
-    
-    # Categories should always have at least "Прочее" now
     if not categories:
-        categories = ["Прочее"]
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+        ]
+        await query.edit_message_text(
+            "Категории не настроены в листе 'Справочник'. Обратитесь к администратору.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
     
     keyboard = []
     for category in categories:
@@ -363,10 +369,16 @@ async def show_type_selection(query, context: ContextTypes.DEFAULT_TYPE):
     category = context_obj.category
     
     types = sheets_client.get_types(direction, category)
-    
-    # Types should always have at least "Прочее" now
     if not types:
-        types = ["Прочее"]
+        keyboard = [
+            [InlineKeyboardButton("⬅️ Назад", callback_data="go_back")],
+            [InlineKeyboardButton("📋 Главное меню", callback_data="back_to_menu")],
+        ]
+        await query.edit_message_text(
+            "Типы не настроены для выбранной категории в листе 'Справочник'.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
     
     keyboard = []
     for type_name in types:
