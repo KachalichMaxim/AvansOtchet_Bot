@@ -195,8 +195,10 @@ class SheetsClient:
                 else:
                     needs_update = True
             
-            if existing_row and not needs_update:
-                return  # Row exists with formulas, nothing to do
+            # Always update if row exists (to ensure latest formula format)
+            # Commented out to allow force updates via script
+            # if existing_row and not needs_update:
+            #     return  # Row exists with formulas, nothing to do
             
             if row_index:
                 next_row = row_index  # Update existing row
