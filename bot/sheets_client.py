@@ -192,13 +192,15 @@ class SheetsClient:
                     if not (col_c.startswith('=') and col_d.startswith('=') and col_e.startswith('=')):
                         needs_update = True
                         print(f"Row {row_index} has static values, will update with formulas")
+                    # Also check if formulas use old format (without $A and EOMONTH)
+                    elif "EOMONTH" not in col_c or "$A" not in col_c:
+                        needs_update = True
+                        print(f"Row {row_index} has old formula format, will update")
                 else:
                     needs_update = True
             
-            # Always update if row exists (to ensure latest formula format)
-            # Commented out to allow force updates via script
-            # if existing_row and not needs_update:
-            #     return  # Row exists with formulas, nothing to do
+            if existing_row and not needs_update:
+                return  # Row exists with correct formulas, nothing to do
             
             if row_index:
                 next_row = row_index  # Update existing row
