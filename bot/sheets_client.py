@@ -161,19 +161,47 @@ class SheetsClient:
     def _ensure_monthly_summary_row(self, employee_name: str, month: str) -> None:
         """
         Ensure a row exists in Итоги_месяца for (employee_name, month).
-        We only append a new row (with formulas) if it's missing; we don't rewrite existing rows.
+        If row exists but has static values (not formulas), update it with formulas.
+        If row doesn't exist, append new row with formulas.
         """
         try:
             summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
             if not summary_sheet:
+                print(f"Sheet '{SHEET_MONTHLY_SUMMARY}' not found")
                 return
 
             values = summary_sheet.get_all_values()
-            for row in values[1:]:
+            existing_row = None
+            row_index = None
+            
+            for i, row in enumerate(values[1:], start=2):
                 if len(row) >= 2 and row[0].strip() == employee_name and row[1].strip() == month:
-                    return
+                    existing_row = row
+                    row_index = i
+                    break
 
-            next_row = len(values) + 1
+            # Check if existing row has formulas (starts with '=') or static values
+            needs_update = False
+            if existing_row and row_index:
+                # Check columns C, D, E (indices 2, 3, 4) for formulas
+                if len(existing_row) >= 5:
+                    col_c = existing_row[2] if len(existing_row) > 2 else ""
+                    col_d = existing_row[3] if len(existing_row) > 3 else ""
+                    col_e = existing_row[4] if len(existing_row) > 4 else ""
+                    # If any column doesn't start with '=', it's not a formula
+                    if not (col_c.startswith('=') and col_d.startswith('=') and col_e.startswith('=')):
+                        needs_update = True
+                        print(f"Row {row_index} has static values, will update with formulas")
+                else:
+                    needs_update = True
+            
+            if existing_row and not needs_update:
+                return  # Row exists with formulas, nothing to do
+            
+            if row_index:
+                next_row = row_index  # Update existing row
+            else:
+                next_row = len(values) + 1  # Append new row
 
             # Month is stored as "MM.YYYY" in column B
             # Parse: LEFT(B{row}, 2) = month, RIGHT(B{row}, 4) = year
@@ -221,7 +249,8 @@ class SheetsClient:
                 f")"
             )
 
-            print(f"Adding row {next_row} for {employee_name}, {month}")
+            action = "Updating" if row_index else "Adding"
+            print(f"{action} row {next_row} for {employee_name}, {month}")
             print(f"Income formula: {income_formula}")
             
             summary_sheet.update(
@@ -229,9 +258,52 @@ class SheetsClient:
                 [[employee_name, month, income_formula, expense_formula, ending_balance_formula]],
                 value_input_option="USER_ENTERED",
             )
-            print(f"Row added successfully")
+            print(f"Row {action.lower()} successfully")
         except Exception as e:
             print(f"Error ensuring monthly summary row: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_all_monthly_summary_formulas(self) -> None:
+        """
+        Update all rows in Итоги_месяца that have static values to use formulas instead.
+        This is a one-time migration function.
+        """
+        try:
+            summary_sheet = self._get_sheet(SHEET_MONTHLY_SUMMARY)
+            if not summary_sheet:
+                print(f"Sheet '{SHEET_MONTHLY_SUMMARY}' not found")
+                return
+
+            values = summary_sheet.get_all_values()
+            if len(values) <= 1:
+                return
+
+            updated_count = 0
+            for i, row in enumerate(values[1:], start=2):
+                if len(row) < 5:
+                    continue
+                
+                employee_name = row[0].strip() if row[0] else ""
+                month = row[1].strip() if len(row) > 1 and row[1] else ""
+                
+                if not employee_name or not month:
+                    continue
+                
+                # Check if columns C, D, E have formulas (start with '=')
+                col_c = row[2] if len(row) > 2 else ""
+                col_d = row[3] if len(row) > 3 else ""
+                col_e = row[4] if len(row) > 4 else ""
+                
+                # If any column doesn't start with '=', it's not a formula - update it
+                if not (col_c.startswith('=') and col_d.startswith('=') and col_e.startswith('=')):
+                    print(f"Updating row {i} for {employee_name}, {month} (has static values)")
+                    self._ensure_monthly_summary_row(employee_name, month)
+                    updated_count += 1
+            
+            print(f"Updated {updated_count} rows with formulas")
+        except Exception as e:
+            print(f"Error updating monthly summary formulas: {e}")
             import traceback
             traceback.print_exc()
     
