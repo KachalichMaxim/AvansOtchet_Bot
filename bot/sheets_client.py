@@ -175,49 +175,65 @@ class SheetsClient:
 
             next_row = len(values) + 1
 
-            # Month is stored as "MM.YYYY"
-            start_date = f"DATE(VALUE(RIGHT(B{next_row};4)); VALUE(LEFT(B{next_row};2)); 1)"
-            end_date = f"EOMONTH({start_date}; 0)"
+            # Month is stored as "MM.YYYY" in column B
+            # Parse: LEFT(B{row}, 2) = month, RIGHT(B{row}, 4) = year
+            # Build date: DATE(year, month, 1) for start, EOMONTH for end
+            month_part = f"VALUE(LEFT(B{next_row};2))"
+            year_part = f"VALUE(RIGHT(B{next_row};4))"
+            start_date = f"DATE({year_part};{month_part};1)"
+            end_date = f"EOMONTH({start_date};0)"
 
+            # Income formula: SUMIFS on employee sheet column B (income)
+            # Filter by date >= start_date and <= end_date
             income_formula = (
                 f"=SUMIFS("
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!B:B\");"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!B:B\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\">=\"&{start_date};"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\"<=\"&{end_date}"
                 f")"
             )
+            
+            # Expense formula: SUMIFS on employee sheet column C (expense)
             expense_formula = (
                 f"=SUMIFS("
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!C:C\");"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!C:C\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\">=\"&{start_date};"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\"<=\"&{end_date}"
                 f")"
             )
+            
+            # Ending balance: sum all income - sum all expense up to end of month
             ending_balance_formula = (
                 f"=SUMIFS("
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!B:B\");"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!B:B\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\"<=\"&{end_date}"
                 f")"
-                f" - "
+                f"-"
                 f"SUMIFS("
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!C:C\");"
-                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!C:C\");"
+                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
                 f"\"<=\"&{end_date}"
                 f")"
             )
 
+            print(f"Adding row {next_row} for {employee_name}, {month}")
+            print(f"Income formula: {income_formula}")
+            
             summary_sheet.update(
                 f"A{next_row}:E{next_row}",
                 [[employee_name, month, income_formula, expense_formula, ending_balance_formula]],
                 value_input_option="USER_ENTERED",
             )
+            print(f"Row added successfully")
         except Exception as e:
             print(f"Error ensuring monthly summary row: {e}")
+            import traceback
+            traceback.print_exc()
     
     def add_operation(
         self,
