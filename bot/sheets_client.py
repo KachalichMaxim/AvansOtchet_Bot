@@ -203,51 +203,31 @@ class SheetsClient:
             else:
                 next_row = len(values) + 1  # Append new row
 
-            # Month is stored as "MM.YYYY" in column B
-            # Parse: LEFT(B{row}, 2) = month, RIGHT(B{row}, 4) = year
-            # Build date: DATE(year, month, 1) for start, EOMONTH for end
-            month_part = f"VALUE(LEFT(B{next_row};2))"
-            year_part = f"VALUE(RIGHT(B{next_row};4))"
-            start_date = f"DATE({year_part};{month_part};1)"
-            end_date = f"EOMONTH({start_date};0)"
-
             # Income formula: SUMIFS on employee sheet column B (income)
-            # Filter by date >= start_date and <= end_date
+            # Uses EOMONTH($B{row};-1)+1 for start of month, EOMONTH($B{row};0) for end
             income_formula = (
                 f"=SUMIFS("
-                f"INDIRECT(\"'\"&A{next_row}&\"'!B:B\");"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\">=\"&{start_date};"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\"<=\"&{end_date}"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!B:B\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\">=\"&EOMONTH($B{next_row};-1)+1;"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&EOMONTH($B{next_row};0)"
                 f")"
             )
             
             # Expense formula: SUMIFS on employee sheet column C (expense)
             expense_formula = (
                 f"=SUMIFS("
-                f"INDIRECT(\"'\"&A{next_row}&\"'!C:C\");"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\">=\"&{start_date};"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\"<=\"&{end_date}"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!C:C\");"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\">=\"&EOMONTH($B{next_row};-1)+1;"
+                f"INDIRECT(\"'\"&$A{next_row}&\"'!A:A\");"
+                f"\"<=\"&EOMONTH($B{next_row};0)"
                 f")"
             )
             
-            # Ending balance: sum all income - sum all expense up to end of month
-            ending_balance_formula = (
-                f"=SUMIFS("
-                f"INDIRECT(\"'\"&A{next_row}&\"'!B:B\");"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\"<=\"&{end_date}"
-                f")"
-                f"-"
-                f"SUMIFS("
-                f"INDIRECT(\"'\"&A{next_row}&\"'!C:C\");"
-                f"INDIRECT(\"'\"&A{next_row}&\"'!A:A\");"
-                f"\"<=\"&{end_date}"
-                f")"
-            )
+            # Ending balance: simple difference between income and expense columns
+            ending_balance_formula = f"=C{next_row}-D{next_row}"
 
             action = "Updating" if row_index else "Adding"
             print(f"{action} row {next_row} for {employee_name}, {month}")
