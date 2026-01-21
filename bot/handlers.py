@@ -221,20 +221,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context_obj = fsm.get_context(user_id)
             # Check if this is rental payment flow (no category set) or category flow
             if not context_obj.category:
-                # Rental payment flow: set date to today, direction to IN, category and type
+                # Rental payment flow: set required fields without triggering extra state transitions
                 today = datetime.now(TZ).strftime("%d.%m.%Y")
-                fsm.set_date(user_id, today)
-                fsm.set_direction(user_id, "IN")
-                # Set category and type for rental payment
-                fsm.set_category(user_id, "Доходы от аренды")
+                context_obj.date = today
+                context_obj.direction = "IN"
+                context_obj.category = "Доходы от аренды"
+
                 # Get type for rental category - try to find "Перевод от арендатора" or use first available
                 types = sheets_client.get_types("IN", "Доходы от аренды")
                 if types and "Перевод от арендатора" in types:
-                    fsm.set_type(user_id, "Перевод от арендатора")
+                    context_obj.type = "Перевод от арендатора"
                 elif types:
-                    fsm.set_type(user_id, types[0])
+                    context_obj.type = types[0]
                 else:
-                    fsm.set_type(user_id, "")
+                    context_obj.type = ""
+
                 fsm.set_state(user_id, State.INPUT_RENTAL_AMOUNT)
                 await request_rental_amount(query, context)
             else:

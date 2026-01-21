@@ -119,23 +119,31 @@ class FSM:
         """Get operation data from context."""
         context = self.get_context(user_id)
         
-        # Validate all required fields are set
-        # Note: type can be empty string, so we check if it's not None
+        # Required fields for saving an operation
         if not all([
             context.direction,
             context.date,
             context.amount is not None,
-            context.category,
-            context.type is not None,  # Allow empty string for type
         ]):
             return None
+
+        # Category/type can be optional.
+        # For rental operations we can auto-fill category/type if missing.
+        is_rental = bool(context.rental_address and context.rental_mm)
+        if is_rental:
+            category = context.category or "Доходы от аренды"
+            # If type is not set (None) or explicitly empty, we still provide something stable
+            type_name = context.type if (context.type is not None and context.type != "") else f"{context.rental_address} {context.rental_mm}"
+        else:
+            category = context.category or ""
+            type_name = context.type if context.type is not None else ""
         
         result = {
             "date": context.date,
             "direction": context.direction,
             "amount": context.amount,
-            "category": context.category,
-            "type": context.type,
+            "category": category,
+            "type": type_name,
             "description": context.description or "",
         }
         
